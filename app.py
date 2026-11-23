@@ -6,6 +6,7 @@ and FinBERT news sentiment from PostgreSQL.
 
 import json
 from contextlib import asynccontextmanager
+from datetime import datetime, timedelta, date
 from pathlib import Path
 from typing import Dict, List, Optional, Any
 from fastapi import FastAPI, HTTPException, Query
@@ -66,13 +67,14 @@ def get_market_summary() -> Dict[str, Any]:
         if not idx_row:
             raise HTTPException(status_code=404, detail="KSE-100 index data not found.")
 
-        # 2. 52-Week High and Low for KSE-100
+        # 2. 52-Week High and Low for KSE-100 (dialect-agnostic parameter binding)
+        cutoff_365 = (datetime.now().date() - timedelta(days=365)).isoformat()
         stats_52w = session.execute(text("""
             SELECT MAX(high) as high_52w, MIN(low) as low_52w
             FROM market_indices
             WHERE index_symbol = 'KSE100'
-              AND trading_date >= (CURRENT_DATE - INTERVAL '365 days');
-        """)).fetchone()
+              AND trading_date >= :cutoff_365;
+        """), {"cutoff_365": cutoff_365}).fetchone()
 
         # 3. Market Breadth from latest stock sessions (fast indexed join)
         breadth = session.execute(text("""
@@ -349,18 +351,23 @@ def get_indicators(
     session = get_session()
     try:
         # Check if precomputed in technical_indicators table
-        rows = session.execute(text("""
-            SELECT trading_date, open, high, low, close, volume,
-                   sma_20, sma_50, sma_200, ema_12, ema_26, ema_20, ema_50, ema_200,
-                   rsi_14, macd_line, macd_signal, macd_diff,
-                   bb_middle, bb_upper, bb_lower, bb_bandwidth, bb_percent_b,
-                   dmi_plus_14, dmi_minus_14, adx_14, atr_14, atr_pct,
-                   obv, stoch_k, stoch_d
-            FROM technical_indicators
-            WHERE symbol = :symbol
-            ORDER BY trading_date DESC
-            LIMIT :limit;
-        """), {"symbol": sym, "limit": days}).fetchall()
+        rows = None
+        try:
+            rows = session.execute(text("""
+                SELECT trading_date, open, high, low, close, volume,
+                       sma_20, sma_50, sma_200, ema_12, ema_26, ema_20, ema_50, ema_200,
+                       rsi_14, macd_line, macd_signal, macd_diff,
+                       bb_middle, bb_upper, bb_lower, bb_bandwidth, bb_percent_b,
+                       dmi_plus_14, dmi_minus_14, adx_14, atr_14, atr_pct,
+                       obv, stoch_k, stoch_d
+                FROM technical_indicators
+                WHERE symbol = :symbol
+                ORDER BY trading_date DESC
+                LIMIT :limit;
+            """), {"symbol": sym, "limit": days}).fetchall()
+        except Exception:
+            session.rollback()
+            rows = None
 
         if rows:
             cols = [

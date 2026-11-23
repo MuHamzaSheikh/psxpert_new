@@ -60,16 +60,16 @@ class ExternalRepoMerger:
             else:
                 if self.is_pg:
                     stmt = text("""
-                        INSERT INTO data_sources (source_name, source_type, base_url, status, provenance_notes)
-                        VALUES (:name, 'GITHUB_REPO', :url, 'SUCCESS', :notes)
+                        INSERT INTO data_sources (source_name, source_type, base_url, status, provenance_notes, retrieval_timestamp)
+                        VALUES (:name, 'GITHUB_REPO', :url, 'SUCCESS', :notes, CURRENT_TIMESTAMP)
                         RETURNING id;
                     """)
                     row = conn.execute(stmt, {"name": src_name, "url": src_url, "notes": notes}).fetchone()
                     source_id = row[0]
                 else:
                     conn.execute(text("""
-                        INSERT INTO data_sources (source_name, source_type, base_url, status, provenance_notes)
-                        VALUES (:name, 'GITHUB_REPO', :url, 'SUCCESS', :notes);
+                        INSERT INTO data_sources (source_name, source_type, base_url, status, provenance_notes, retrieval_timestamp)
+                        VALUES (:name, 'GITHUB_REPO', :url, 'SUCCESS', :notes, CURRENT_TIMESTAMP);
                     """), {"name": src_name, "url": src_url, "notes": notes})
                     row = conn.execute(text("SELECT id FROM data_sources WHERE source_name = :name"), {"name": src_name}).fetchone()
                     source_id = row[0]
@@ -352,7 +352,14 @@ class ExternalRepoMerger:
 
 
 if __name__ == "__main__":
-    repo_path = r"C:\Users\HP\.gemini\antigravity-ide\brain\b5290a13-c586-4e0f-ba99-dd263f4c8fe4\scratch\PSX-Data"
+    local_repo = Path(__file__).resolve().parent.parent.parent / "data" / "fundamentals_external"
+    scratch_repo = Path(r"C:\Users\HP\.gemini\antigravity-ide\brain\b5290a13-c586-4e0f-ba99-dd263f4c8fe4\scratch\PSX-Data")
+    if local_repo.exists() and (local_repo / "PSX_Fundamentals_Balance_Sheet.csv").exists():
+        repo_path = str(local_repo)
+    elif scratch_repo.exists():
+        repo_path = str(scratch_repo)
+    else:
+        repo_path = str(local_repo)
     fund_only = "--fundamentals-only" in sys.argv
     merger = ExternalRepoMerger(repo_path)
     merger.run_all(fundamentals_only=fund_only)
